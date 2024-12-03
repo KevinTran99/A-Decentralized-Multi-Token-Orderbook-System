@@ -1,0 +1,15 @@
+{
+  "name": "blockchain",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Kevin Tran",
+  "license": "UNLICENSED",
+  "description": "Smart contracts, Hardhat configuration, and deployment scripts for the decentralized multi-token orderbook system",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.17"
+  }
+}

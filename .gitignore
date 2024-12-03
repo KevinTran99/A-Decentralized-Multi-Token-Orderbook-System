@@ -1,0 +1,17 @@
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+
+# Hardhat files
+artifacts/
+cache/
+coverage/
+coverage.json
+typechain-types/
+deployments/
+
+# Remix dependencies
+.deps
+.states
