@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /**
  * @title OrderBookDEX
@@ -62,6 +63,12 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @notice Mapping from order ID to its location data for efficient lookups
     mapping(uint256 => OrderLocation) public orderLocations;
 
+    /// @notice Emitted when a new token is listed for trading
+    /// Token contract address that was listed
+    /// Number of decimal places for the token
+    /// Address of the account that listed the token
+    event TokenListed(address indexed token, uint8 decimals, address indexed lister);
+
     /**
      * @dev Contract constructor
      * @param _usdt Address of the USDT contract
@@ -70,5 +77,24 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         require(_usdt != address(0), "Invalid USDT address");
         USDT = IERC20(_usdt);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(PAIR_LISTER_ROLE, msg.sender);
+    }
+
+    /// @notice Lists a new token for trading against USDT
+    /// @dev Verifies ERC20 compliance through decimals() call
+    /// @param _token Token contract address
+    function listToken(address _token) external onlyRole(PAIR_LISTER_ROLE) {
+        require(_token != address(0), "Zero address");
+        require(!listedTokens[_token].isListed, "Already listed");
+        require(_token != address(USDT), "Cannot list USDT");
+
+        uint8 tokenDecimals = IERC20Metadata(_token).decimals();
+
+        listedTokens[_token] = TokenInfo({
+            decimals: tokenDecimals,
+            isListed: true
+        });
+        
+        emit TokenListed(_token, tokenDecimals, msg.sender);
     }
 }
