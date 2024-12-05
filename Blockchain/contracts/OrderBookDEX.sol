@@ -69,6 +69,24 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// Address of the account that listed the token
     event TokenListed(address indexed token, uint8 decimals, address indexed lister);
 
+    /// @notice Emitted when a new order is created
+    /// Unique identifier of the created order
+    /// Address that created the order
+    /// Token address being traded
+    /// True if this is a buy order
+    /// Price per token in USDT
+    /// Amount of tokens in the order
+    /// Block timestamp when order was created
+    event OrderCreated(
+        uint256 indexed orderId,
+        address indexed maker,
+        address indexed token,
+        bool isBuyOrder,
+        uint256 price,
+        uint256 amount,
+        uint256 timestamp
+    );
+
     /**
      * @dev Contract constructor
      * @param _usdt Address of the USDT contract
@@ -96,5 +114,68 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         });
         
         emit TokenListed(_token, tokenDecimals, msg.sender);
+    }
+
+    /// @notice Creates a buy order for a listed token
+    /// @dev Locks USDT payment in contract until order is filled or cancelled
+    /// @param _token Token contract address
+    /// @param _price Price per token in USDT
+    /// @param _amount Amount of tokens to buy
+    /// @return orderId Unique identifier for the created order
+    function createBuyOrder(address _token, uint256 _price, uint256 _amount) external nonReentrant returns (uint256) {
+        require(listedTokens[_token].isListed, "Token not listed");
+        require(_price > 0, "Invalid price");
+        require(_amount > 0, "Invalid amount");
+
+        uint256 totalCost = _price * _amount;
+        require(USDT.transferFrom(msg.sender, address(this), totalCost), "USDT transfer failed");
+
+        return _createOrder(_token, true, _price, _amount);
+    }
+
+    /// @notice Creates a sell order for a listed token
+    /// @dev Locks tokens in contract until order is filled or cancelled
+    /// @param _token Token contract address
+    /// @param _price Price per token in USDT
+    /// @param _amount Amount of tokens to sell
+    /// @return orderId Unique identifier for the created order
+    function createSellOrder(address _token, uint256 _price, uint256 _amount) external nonReentrant returns (uint256) {
+        require(listedTokens[_token].isListed, "Token not listed");
+        require(_price > 0, "Invalid price");
+        require(_amount > 0, "Invalid amount");
+
+        require(IERC20(_token).transferFrom(msg.sender, address(this), _amount), "Token transfer failed");
+
+        return _createOrder(_token, false, _price, _amount);
+    }
+
+    /// @notice Internal helper to create and store order details
+    /// @dev Updates order ID counter and maintains order location mappings
+    /// @param _token Token contract address
+    /// @param _isBuyOrder Type of order (true for buy, false for sell)
+    /// @param _price Price per token in USDT
+    /// @param _amount Amount of tokens in order
+    /// @return orderId Unique identifier for the created order
+    function _createOrder(address _token, bool _isBuyOrder, uint256 _price, uint256 _amount) private returns (uint256) {
+        orderId++;
+
+        activeOrdersByToken[_token].push(Order({
+            orderId: orderId,
+            maker: msg.sender,
+            token: _token,
+            isBuyOrder: _isBuyOrder,
+            price: _price,
+            amount: _amount,
+            filled: 0
+        }));
+
+        orderLocations[orderId] = OrderLocation({
+            token: _token,
+            index: activeOrdersByToken[_token].length - 1
+        });
+
+        emit OrderCreated(orderId, msg.sender, _token, _isBuyOrder, _price, _amount, block.timestamp);
+
+        return orderId;
     }
 }
