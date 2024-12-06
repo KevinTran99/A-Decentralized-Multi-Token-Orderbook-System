@@ -213,6 +213,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         require(USDT.transferFrom(msg.sender, address(this), _totalUsdt), "USDT transfer failed");
 
         uint256 remainingUsdt = _totalUsdt;
+        uint256 ordersMatched;
         
         for (uint256 i = 0; i < _orderIds.length; i++) {
             OrderInfo memory orderInfo = orderInfos[_orderIds[i]];
@@ -221,7 +222,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
 
             if (order.orderId != _orderIds[i] ||
                 order.isBuyOrder ||
-                order.amount - order.filled < _amounts[i] ||
+                order.token != orderInfo.token ||
+                order.amount - order.filled < amountWanted ||
                 amountWanted == 0) {
                 continue;
             }
@@ -231,17 +233,24 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
                 continue;
             }
 
-            require(USDT.transfer(order.maker, orderCost), "USDT transfer failed");
-            require(IERC20(order.token).transfer(msg.sender, amountWanted), "Token transfer failed");
-
             order.filled += amountWanted;
             remainingUsdt -= orderCost;
+            ordersMatched++;
+
+            require(USDT.transfer(order.maker, orderCost), "USDT transfer failed");
+            require(IERC20(order.token).transfer(msg.sender, amountWanted), "Token transfer failed");
 
             emit OrderFilled(order.orderId, order.maker, msg.sender, order.token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
 
             if (order.filled == order.amount) {
                 _removeOrder(_orderIds[i], orderInfo.token, orderInfo.index);
             }
+        }
+
+        require(ordersMatched > 0, "No orders matched");
+
+        if (remainingUsdt > 0) {
+            require(USDT.transfer(msg.sender, remainingUsdt), "USDT transfer failed");
         }
     }
 
