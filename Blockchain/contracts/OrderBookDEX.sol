@@ -245,6 +245,58 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         }
     }
 
+    /// @notice Executes market sell orders against existing buy orders
+    /// @dev Processes multiple orders in single transaction, skipping invalid ones
+    /// @param _orderIds Array of order IDs to sell to
+    /// @param _amounts Array of amounts to sell to each order
+    /// @param _token Token address to sell
+    /// @param _totalAmount Total amount of tokens to sell
+    function marketSell(uint256[] calldata _orderIds, uint256[] calldata _amounts, address _token, uint256 _totalAmount) external nonReentrant {
+        require(_orderIds.length > 0 && _orderIds.length == _amounts.length, "Invalid input");
+        require(_totalAmount > 0, "Invalid amount");
+        require(listedTokens[_token].isListed, "Token not listed");
+
+        require(IERC20(_token).transferFrom(msg.sender, address(this), _totalAmount), "Token transfer failed");
+
+        uint256 remainingAmount = _totalAmount;
+        uint256 ordersMatched;
+
+        for (uint256 i = 0; i < _orderIds.length; i++) {
+            OrderInfo memory orderInfo = orderInfos[_orderIds[i]];
+            Order storage order = activeOrdersByToken[_token][orderInfo.index];
+            uint256 amountWanted = _amounts[i];
+
+
+            if (order.orderId != _orderIds[i] ||
+                !order.isBuyOrder ||
+                order.token != _token ||
+                order.amount - order.filled < amountWanted ||
+                amountWanted == 0) {
+                continue;
+            }
+
+            order.filled += amountWanted;
+            remainingAmount -= amountWanted;
+            ordersMatched++;
+
+            require(IERC20(_token).transfer(order.maker, amountWanted), "Token transfer failed");
+            uint256 usdtAmount = amountWanted * order.price;
+            require(USDT.transfer(msg.sender, usdtAmount), "USDT transfer failed");
+
+            emit OrderFilled(order.orderId, order.maker, msg.sender, _token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
+
+            if (order.filled == order.amount) {
+                _removeOrder(order.orderId, _token, orderInfo.index);
+            }
+        }
+
+        require(ordersMatched > 0, "No orders matched");
+
+        if (remainingAmount > 0) {
+            require(IERC20(_token).transfer(msg.sender, remainingAmount), "Token transfer failed");
+        }
+    }
+
     /// @notice Internal helper to remove a completely filled order
     /// @dev Uses swap-and-pop pattern to avoid array shifts and maintains accurate indexes for swapped orders
     /// @param _orderId ID of the order to remove
