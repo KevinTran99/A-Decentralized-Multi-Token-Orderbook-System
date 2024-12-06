@@ -43,10 +43,10 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         uint256 filled;
     }
 
-    /// @notice Struct to store order location information
+    /// @notice Struct to store order information
     /// Token address being traded in the order
     /// Index position in the activeOrdersByToken array
-    struct OrderLocation {
+    struct OrderInfo {
         address token;
         uint256 index;
     }
@@ -60,8 +60,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @notice Mapping of token address to its active orders
     mapping(address => Order[]) public activeOrdersByToken;
 
-    /// @notice Mapping from order ID to its location data for efficient lookups
-    mapping(uint256 => OrderLocation) public orderLocations;
+    /// @notice Mapping from order ID to its order information
+    mapping(uint256 => OrderInfo) public orderInfos;
 
     /// @notice Emitted when a new token is listed for trading
     /// Token contract address that was listed
@@ -84,6 +84,28 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         bool isBuyOrder,
         uint256 price,
         uint256 amount,
+        uint256 timestamp
+    );
+
+    /// @notice Emitted when an order is filled
+    /// Order ID that was filled
+    /// Address that created the order
+    /// Address that filled the order
+    /// Token address being traded
+    /// True if this is a buy order
+    /// Price per token in USDT
+    /// Amount of tokens in the order
+    /// Amount of tokens filled
+    /// Block timestamp when fill occurred
+    event OrderFilled(
+        uint256 indexed orderId,
+        address indexed maker,
+        address indexed taker,
+        address token,
+        bool isBuyOrder,
+        uint256 price,
+        uint256 amount,
+        uint256 filled,
         uint256 timestamp
     );
 
@@ -169,7 +191,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             filled: 0
         }));
 
-        orderLocations[orderId] = OrderLocation({
+        orderInfos[orderId] = OrderInfo({
             token: _token,
             index: activeOrdersByToken[_token].length - 1
         });
@@ -177,5 +199,66 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         emit OrderCreated(orderId, msg.sender, _token, _isBuyOrder, _price, _amount, block.timestamp);
 
         return orderId;
+    }
+
+    /// @notice Executes market buy orders against existing sell orders
+    /// @dev Processes multiple orders in single transaction, skipping invalid ones
+    /// @param _orderIds Array of order IDs to buy from
+    /// @param _amounts Array of amounts to buy from each order
+    /// @param _totalUsdt Total USDT to spend on orders
+    function marketBuy(uint256[] calldata _orderIds, uint256[] calldata _amounts, uint256 _totalUsdt) external nonReentrant {
+        require(_orderIds.length > 0 && _orderIds.length == _amounts.length, "Invalid input");
+        require(_totalUsdt > 0, "Invalid USDT amount");
+
+        require(USDT.transferFrom(msg.sender, address(this), _totalUsdt), "USDT transfer failed");
+
+        uint256 remainingUsdt = _totalUsdt;
+        
+        for (uint256 i = 0; i < _orderIds.length; i++) {
+            OrderInfo memory orderInfo = orderInfos[_orderIds[i]];
+            Order storage order = activeOrdersByToken[orderInfo.token][orderInfo.index];
+            uint256 amountWanted = _amounts[i];
+
+            if (order.orderId != _orderIds[i] ||
+                order.isBuyOrder ||
+                order.amount - order.filled < _amounts[i] ||
+                amountWanted == 0) {
+                continue;
+            }
+
+            uint256 orderCost = amountWanted * order.price;
+            if (orderCost > remainingUsdt) {
+                continue;
+            }
+
+            require(USDT.transfer(order.maker, orderCost), "USDT transfer failed");
+            require(IERC20(order.token).transfer(msg.sender, amountWanted), "Token transfer failed");
+
+            order.filled += amountWanted;
+            remainingUsdt -= orderCost;
+
+            emit OrderFilled(order.orderId, order.maker, msg.sender, order.token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
+
+            if (order.filled == order.amount) {
+                _removeOrder(_orderIds[i], orderInfo.token, orderInfo.index);
+            }
+        }
+    }
+
+    /// @notice Internal helper to remove a completely filled order
+    /// @dev Uses swap-and-pop pattern to avoid array shifts and maintains accurate indexes for swapped orders
+    /// @param _orderId ID of the order to remove
+    /// @param _token Token address of the order
+    /// @param _index Index of the order in the activeOrdersByToken array
+    function _removeOrder(uint256 _orderId, address _token, uint256 _index) private {
+        Order[] storage orders = activeOrdersByToken[_token];
+
+        if (_index != orders.length - 1) {
+            orders[_index] = orders[orders.length - 1];
+            orderInfos[orders[_index].orderId].index = _index;
+        }
+
+        orders.pop();
+        delete orderInfos[_orderId];
     }
 }
