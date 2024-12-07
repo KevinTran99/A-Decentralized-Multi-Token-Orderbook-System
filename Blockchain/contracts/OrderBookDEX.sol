@@ -310,6 +310,13 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         _removeOrder(_orderId, orderInfo.token, orderInfo.index);
     }
 
+    /// @notice Returns all active orders for a given token
+    /// @param _token Token contract address
+    /// @return Array of active orders for the token
+    function getActiveOrders(address _token) external view returns (Order[] memory) {
+        return activeOrdersByToken[_token];
+    }
+
     /// @notice Internal helper to create and store order details
     /// @dev Updates order ID counter and maintains order location mappings
     /// @param _token Token contract address
