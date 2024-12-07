@@ -109,6 +109,18 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         uint256 timestamp
     );
 
+    /// @notice Emitted when an order is cancelled by its maker
+    /// Order ID that was cancelled
+    /// Address that created the order
+    /// Token address being traded
+    /// Block timestamp when cancellation occured
+    event OrderCancelled(
+        uint256 indexed orderId,
+        address indexed maker,
+        address indexed token,
+        uint256 timestamp
+    );
+
     /**
      * @dev Contract constructor
      * @param _usdt Address of the USDT contract
@@ -303,6 +315,29 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         if (remainingAmount > 0) {
             require(IERC20(_token).transfer(msg.sender, remainingAmount), "Token transfer failed");
         }
+    }
+
+    /// @notice Allows the maker to cancel their order and receive back locked tokens
+    /// @dev Validates order ownership and handles refunds based on order type
+    /// @param _orderId ID of the order to cancel
+    function cancelOrder(uint256 _orderId) external nonReentrant {
+        OrderInfo memory orderInfo = orderInfos[_orderId];
+        require(orderInfo.token != address(0), "Order not found");
+
+        Order storage order = activeOrdersByToken[orderInfo.token][orderInfo.index];
+        require(order.maker == msg.sender, "Not order maker");
+
+        uint256 remainingAmount = order.amount - order.filled;
+
+        if (order.isBuyOrder) {
+            uint256 refundAmount = remainingAmount * order.price;
+            require(USDT.transfer(msg.sender, refundAmount), "USDT transfer failed");
+        } else {
+            require(IERC20(orderInfo.token).transfer(msg.sender, remainingAmount), "Token transfer failed");
+        }
+
+        emit OrderCancelled(_orderId, order.maker, orderInfo.token, block.timestamp);
+        _removeOrder(_orderId, orderInfo.token, orderInfo.index);
     }
 
     /// @notice Internal helper to remove a completely filled order
