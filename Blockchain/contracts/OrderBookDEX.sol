@@ -14,6 +14,12 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @notice USDT contract used as the quote currency for all trading pairs
     IERC20 public immutable USDT;
 
+    /// @notice Fee percentage charged on trades (2 decimals: 100 = 1%)
+    uint256 public feePercent;
+
+    /// @notice USDT fees collected from trades
+    uint256 public collectedFees;
+
     /// @notice Role for accounts that can list new trading pairs
     bytes32 public constant PAIR_LISTER_ROLE = keccak256("PAIR_LISTER_ROLE");
 
@@ -211,12 +217,15 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             }
 
             uint256 orderCost = amountWanted * order.price;
-            if (orderCost > remainingUsdt) {
+            uint256 fee = (orderCost * feePercent) / 10000;
+            
+            if (orderCost + fee > remainingUsdt) {
                 continue;
             }
 
             order.filled += amountWanted;
-            remainingUsdt -= orderCost;
+            remainingUsdt -= orderCost + fee;
+            collectedFees += fee;
             ordersMatched++;
 
             require(USDT.transfer(order.maker, orderCost), "USDT transfer failed");
@@ -265,13 +274,16 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
                 continue;
             }
 
+            uint256 orderCost = amountWanted * order.price;
+            uint256 fee = (orderCost * feePercent) / 10000;
+            
             order.filled += amountWanted;
             remainingAmount -= amountWanted;
+            collectedFees += fee;
             ordersMatched++;
 
             require(IERC20(_token).transfer(order.maker, amountWanted), "Token transfer failed");
-            uint256 orderCost = amountWanted * order.price;
-            require(USDT.transfer(msg.sender, orderCost), "USDT transfer failed");
+            require(USDT.transfer(msg.sender, orderCost - fee), "USDT transfer failed");
 
             emit OrderFilled(order.orderId, order.maker, msg.sender, _token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
 
@@ -308,6 +320,25 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
 
         emit OrderCancelled(_orderId, order.maker, orderInfo.token, block.timestamp);
         _removeOrder(_orderId, orderInfo.token, orderInfo.index);
+    }
+
+    /// @notice Updates the trading fee percentage
+    /// @dev Fee is in basis points (100 = 1%)
+    /// @param _feePercent New fee percentage
+    function setFeePercent(uint256 _feePercent) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_feePercent <= 200, "Max fee is 2%");
+        feePercent = _feePercent;
+    }
+
+    /// @notice Withdraws collected trading fees
+    /// @param _to Address to send the withdrawn fees
+    /// @param _amount Amount of fees to withdraw
+    function withdrawFees(address _to, uint256 _amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_to != address(0), "Invalid address");
+        require(_amount > 0 && _amount <= collectedFees, "Invalid withdrawal amount");
+
+        collectedFees -= _amount;
+        require(USDT.transfer(_to, _amount), "USDT transfer failed");
     }
 
     /// @notice Returns all active orders for a given token
