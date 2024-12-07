@@ -263,7 +263,6 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     function marketSell(uint256[] calldata _orderIds, uint256[] calldata _amounts, address _token, uint256 _totalAmount) external nonReentrant {
         require(_orderIds.length > 0 && _orderIds.length == _amounts.length, "Invalid input");
         require(_totalAmount > 0, "Invalid amount");
-        require(listedTokens[_token].isListed, "Token not listed");
 
         require(IERC20(_token).transferFrom(msg.sender, address(this), _totalAmount), "Token transfer failed");
 
@@ -275,11 +274,11 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             Order storage order = activeOrdersByToken[_token][orderInfo.index];
             uint256 amountWanted = _amounts[i];
 
-
             if (order.orderId != _orderIds[i] ||
                 !order.isBuyOrder ||
                 order.token != _token ||
                 order.amount - order.filled < amountWanted ||
+                amountWanted > remainingAmount ||
                 amountWanted == 0) {
                 continue;
             }
@@ -289,8 +288,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             ordersMatched++;
 
             require(IERC20(_token).transfer(order.maker, amountWanted), "Token transfer failed");
-            uint256 usdtAmount = amountWanted * order.price;
-            require(USDT.transfer(msg.sender, usdtAmount), "USDT transfer failed");
+            uint256 orderCost = amountWanted * order.price;
+            require(USDT.transfer(msg.sender, orderCost), "USDT transfer failed");
 
             emit OrderFilled(order.orderId, order.maker, msg.sender, _token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
 
