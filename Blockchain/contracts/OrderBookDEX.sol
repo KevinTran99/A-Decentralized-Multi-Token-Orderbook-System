@@ -183,36 +183,6 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         return _createOrder(_token, false, _price, _amount);
     }
 
-    /// @notice Internal helper to create and store order details
-    /// @dev Updates order ID counter and maintains order location mappings
-    /// @param _token Token contract address
-    /// @param _isBuyOrder Type of order (true for buy, false for sell)
-    /// @param _price Price per token in USDT
-    /// @param _amount Amount of tokens in order
-    /// @return orderId Unique identifier for the created order
-    function _createOrder(address _token, bool _isBuyOrder, uint256 _price, uint256 _amount) private returns (uint256) {
-        orderId++;
-
-        activeOrdersByToken[_token].push(Order({
-            orderId: orderId,
-            maker: msg.sender,
-            token: _token,
-            isBuyOrder: _isBuyOrder,
-            price: _price,
-            amount: _amount,
-            filled: 0
-        }));
-
-        orderInfos[orderId] = OrderInfo({
-            token: _token,
-            index: activeOrdersByToken[_token].length - 1
-        });
-
-        emit OrderCreated(orderId, msg.sender, _token, _isBuyOrder, _price, _amount, block.timestamp);
-
-        return orderId;
-    }
-
     /// @notice Executes market buy orders against existing sell orders
     /// @dev Processes multiple orders in single transaction, skipping invalid ones
     /// @param _orderIds Array of order IDs to buy from
@@ -338,6 +308,36 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
 
         emit OrderCancelled(_orderId, order.maker, orderInfo.token, block.timestamp);
         _removeOrder(_orderId, orderInfo.token, orderInfo.index);
+    }
+
+    /// @notice Internal helper to create and store order details
+    /// @dev Updates order ID counter and maintains order location mappings
+    /// @param _token Token contract address
+    /// @param _isBuyOrder Type of order (true for buy, false for sell)
+    /// @param _price Price per token in USDT
+    /// @param _amount Amount of tokens in order
+    /// @return orderId Unique identifier for the created order
+    function _createOrder(address _token, bool _isBuyOrder, uint256 _price, uint256 _amount) private returns (uint256) {
+        orderId++;
+
+        activeOrdersByToken[_token].push(Order({
+            orderId: orderId,
+            maker: msg.sender,
+            token: _token,
+            isBuyOrder: _isBuyOrder,
+            price: _price,
+            amount: _amount,
+            filled: 0
+        }));
+
+        orderInfos[orderId] = OrderInfo({
+            token: _token,
+            index: activeOrdersByToken[_token].length - 1
+        });
+
+        emit OrderCreated(orderId, msg.sender, _token, _isBuyOrder, _price, _amount, block.timestamp);
+
+        return orderId;
     }
 
     /// @notice Internal helper to remove a completely filled order
