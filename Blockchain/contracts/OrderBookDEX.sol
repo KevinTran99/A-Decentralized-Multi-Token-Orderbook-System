@@ -127,12 +127,104 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         uint256 timestamp
     );
 
+    /// @notice Error thrown when zero address is provided
+    /// @param zeroAddress The invalid zero address
+    error ZeroAddress(address zeroAddress);
+    
+    /// @notice Error thrown when price is set to zero
+    /// @param price The invalid zero price
+    error InvalidPrice(uint256 price);
+
+    /// @notice Error thrown when amount is set to zero
+    /// @param amount The invalid zero amount
+    error InvalidAmount(uint256 amount);
+
+    /// @notice Error thrown when attempting to interact with an unlisted token
+    /// @param token The token address that is not listed
+    error TokenNotListed(address token);
+
+    /// @notice Error thrown when token is already listed for trading
+    /// @param token The token address that is already listed
+    error TokenAlreadyListed(address token);
+
+    /// @notice Error thrown when attempting to list USDT as a trading token
+    /// @param token The USDT token address
+    error CannotListUsdt(address token);
+
+    /// @notice Error thrown when USDT transfer fails
+    /// @param from Address attempting to send USDT
+    /// @param to Address intended to receive USDT
+    /// @param amount Amount of USDT being transferred
+    error UsdtTransferFailed(address from, address to, uint256 amount);
+
+    /// @notice Error thrown when token transfer fails
+    /// @param from Address attempting to send tokens
+    /// @param to Address intended to receive tokens
+    /// @param amount Amount of tokens being transferred
+    error TokenTransferFailed(address from, address to, uint256 amount);
+
+    /// @notice Error thrown when order ID does not exist
+    /// @param order The order ID that was not found
+    error OrderNotFound(uint256 order);
+
+    /// @notice Error thrown when non-maker attempts to modify order
+    /// @param caller Address attempting to modify the order
+    /// @param maker Address of the actual order maker
+    error NotOrderMaker(address caller, address maker);
+
+    /// @notice Error thrown when no orders were matched in a market order
+    error NoOrdersMatched();
+
+    /// @notice Error thrown when input array lengths do not match
+    /// @param idsLength Length of order IDs array
+    /// @param amountsLength Length of amounts array
+    error ArrayLengthsMismatch(uint256 idsLength, uint256 amountsLength);
+
+    /// @notice Error thrown when fee percentage exceeds maximum
+    /// @param feePercent The invalid fee percentage
+    error FeeSetToHigh(uint256 feePercent);
+
+    /// @notice Error thrown when invalid USDT amount is provided
+    /// @param amount The invalid USDT amount
+    error InvalidUsdtAmount(uint256 amount);
+
+    /// @notice Error thrown when invalid token amount is provided
+    /// @param amount The invalid token amount
+    error InvalidTokenAmount(uint256 amount);
+
+    /// @notice Ensures the token is listed before executing the function
+    /// @param _token Token address to check
+    modifier onlyListed(address _token) {
+        if (!listedTokens[_token].isListed) {
+            revert TokenNotListed(_token);
+        }
+        _;
+    }
+
+    /// @notice Ensures the price is not zero
+    /// @param _price Price to validate
+    modifier validPrice(uint256 _price) {
+        if (_price == 0) {
+            revert InvalidPrice(_price);
+        }
+        _;
+    }
+
+    /// @notice Ensures the amount is not zero
+    /// @param _amount Amount to validate
+    modifier validAmount(uint256 _amount) {
+        if (_amount == 0) {
+            revert InvalidAmount(_amount);
+        }
+        _;
+    }
+
     /**
      * @dev Contract constructor
      * @param _usdt Address of the USDT contract
      */
     constructor(address _usdt) {
-        require(_usdt != address(0), "Invalid USDT address");
+        if (_usdt == address(0)) revert ZeroAddress(_usdt);
         USDT = IERC20(_usdt);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(PAIR_LISTER_ROLE, msg.sender);
@@ -142,9 +234,9 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @dev Verifies ERC20 compliance through decimals() call
     /// @param _token Token contract address
     function listToken(address _token) external onlyRole(PAIR_LISTER_ROLE) {
-        require(_token != address(0), "Zero address");
-        require(!listedTokens[_token].isListed, "Already listed");
-        require(_token != address(USDT), "Cannot list USDT");
+        if (_token == address(0)) revert ZeroAddress(_token);
+        if (listedTokens[_token].isListed) revert TokenAlreadyListed(_token);
+        if (_token == address(USDT)) revert CannotListUsdt(_token);
 
         uint8 tokenDecimals = IERC20Metadata(_token).decimals();
 
@@ -162,13 +254,9 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _price Price per token in USDT
     /// @param _amount Amount of tokens to buy
     /// @return orderId Unique identifier for the created order
-    function createBuyOrder(address _token, uint256 _price, uint256 _amount) external nonReentrant returns (uint256) {
-        require(listedTokens[_token].isListed, "Token not listed");
-        require(_price > 0, "Invalid price");
-        require(_amount > 0, "Invalid amount");
-
+    function createBuyOrder(address _token, uint256 _price, uint256 _amount) external onlyListed(_token) validPrice(_price) validAmount(_amount) nonReentrant returns (uint256) {
         uint256 totalCost = _price * _amount;
-        require(USDT.transferFrom(msg.sender, address(this), totalCost), "USDT transfer failed");
+        if (!USDT.transferFrom(msg.sender, address(this), totalCost)) revert UsdtTransferFailed(msg.sender, address(this), totalCost);
 
         return _createOrder(_token, true, _price, _amount);
     }
@@ -179,12 +267,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _price Price per token in USDT
     /// @param _amount Amount of tokens to sell
     /// @return orderId Unique identifier for the created order
-    function createSellOrder(address _token, uint256 _price, uint256 _amount) external nonReentrant returns (uint256) {
-        require(listedTokens[_token].isListed, "Token not listed");
-        require(_price > 0, "Invalid price");
-        require(_amount > 0, "Invalid amount");
-
-        require(IERC20(_token).transferFrom(msg.sender, address(this), _amount), "Token transfer failed");
+    function createSellOrder(address _token, uint256 _price, uint256 _amount) external onlyListed(_token) validPrice(_price) validAmount(_amount) nonReentrant returns (uint256) {
+        if (!IERC20(_token).transferFrom(msg.sender, address(this), _amount)) revert TokenTransferFailed(msg.sender, address(this), _amount);
 
         return _createOrder(_token, false, _price, _amount);
     }
@@ -195,16 +279,20 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _amounts Array of amounts to buy from each order
     /// @param _totalUsdt Total USDT to spend on orders
     function marketBuy(uint256[] calldata _orderIds, uint256[] calldata _amounts, uint256 _totalUsdt) external nonReentrant {
-        require(_orderIds.length > 0 && _orderIds.length == _amounts.length, "Invalid input");
-        require(_totalUsdt > 0, "Invalid USDT amount");
+        if (_orderIds.length != _amounts.length) revert ArrayLengthsMismatch(_orderIds.length, _amounts.length);
+        if (_totalUsdt == 0) revert InvalidUsdtAmount(_totalUsdt);
 
-        require(USDT.transferFrom(msg.sender, address(this), _totalUsdt), "USDT transfer failed");
+        if (!USDT.transferFrom(msg.sender, address(this), _totalUsdt)) revert UsdtTransferFailed(msg.sender, address(this), _totalUsdt);
 
         uint256 remainingUsdt = _totalUsdt;
         uint256 ordersMatched;
         
         for (uint256 i = 0; i < _orderIds.length; i++) {
             OrderInfo memory orderInfo = orderInfos[_orderIds[i]];
+            if (orderInfo.token == address(0)) {
+                continue;
+            }
+
             Order storage order = activeOrdersByToken[orderInfo.token][orderInfo.index];
             uint256 amountWanted = _amounts[i];
 
@@ -228,8 +316,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             collectedFees += fee;
             ordersMatched++;
 
-            require(USDT.transfer(order.maker, orderCost), "USDT transfer failed");
-            require(IERC20(order.token).transfer(msg.sender, amountWanted), "Token transfer failed");
+            if (!USDT.transfer(order.maker, orderCost)) revert UsdtTransferFailed(address(this), order.maker, orderCost);
+            if (!IERC20(order.token).transfer(msg.sender, amountWanted)) revert TokenTransferFailed(address(this), msg.sender, amountWanted);
 
             emit OrderFilled(order.orderId, order.maker, msg.sender, order.token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
 
@@ -238,10 +326,10 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             }
         }
 
-        require(ordersMatched > 0, "No orders matched");
+        if (ordersMatched == 0) revert NoOrdersMatched();
 
         if (remainingUsdt > 0) {
-            require(USDT.transfer(msg.sender, remainingUsdt), "USDT transfer failed");
+            if (!USDT.transfer(msg.sender, remainingUsdt)) revert UsdtTransferFailed(address(this), msg.sender, remainingUsdt);
         }
     }
 
@@ -250,18 +338,22 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _orderIds Array of order IDs to sell to
     /// @param _amounts Array of amounts to sell to each order
     /// @param _token Token address to sell
-    /// @param _totalAmount Total amount of tokens to sell
-    function marketSell(uint256[] calldata _orderIds, uint256[] calldata _amounts, address _token, uint256 _totalAmount) external nonReentrant {
-        require(_orderIds.length > 0 && _orderIds.length == _amounts.length, "Invalid input");
-        require(_totalAmount > 0, "Invalid amount");
+    /// @param _totalTokens Total amount of tokens to sell
+    function marketSell(uint256[] calldata _orderIds, uint256[] calldata _amounts, address _token, uint256 _totalTokens) external nonReentrant {
+        if (_orderIds.length != _amounts.length) revert ArrayLengthsMismatch(_orderIds.length, _amounts.length);
+        if (_totalTokens == 0) revert InvalidTokenAmount(_totalTokens);
 
-        require(IERC20(_token).transferFrom(msg.sender, address(this), _totalAmount), "Token transfer failed");
+        if (!IERC20(_token).transferFrom(msg.sender, address(this), _totalTokens)) revert TokenTransferFailed(msg.sender, address(this), _totalTokens);
 
-        uint256 remainingAmount = _totalAmount;
+        uint256 remainingAmount = _totalTokens;
         uint256 ordersMatched;
 
         for (uint256 i = 0; i < _orderIds.length; i++) {
             OrderInfo memory orderInfo = orderInfos[_orderIds[i]];
+            if (orderInfo.token == address(0)) {
+                continue;
+            }
+
             Order storage order = activeOrdersByToken[_token][orderInfo.index];
             uint256 amountWanted = _amounts[i];
 
@@ -282,8 +374,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             collectedFees += fee;
             ordersMatched++;
 
-            require(IERC20(_token).transfer(order.maker, amountWanted), "Token transfer failed");
-            require(USDT.transfer(msg.sender, orderCost - fee), "USDT transfer failed");
+            if (!IERC20(_token).transfer(order.maker, amountWanted)) revert TokenTransferFailed(address(this), order.maker, amountWanted);
+            if (!USDT.transfer(msg.sender, orderCost - fee)) revert UsdtTransferFailed(address(this), msg.sender, orderCost - fee);
 
             emit OrderFilled(order.orderId, order.maker, msg.sender, _token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
 
@@ -292,10 +384,10 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             }
         }
 
-        require(ordersMatched > 0, "No orders matched");
+        if (ordersMatched == 0) revert NoOrdersMatched();
 
         if (remainingAmount > 0) {
-            require(IERC20(_token).transfer(msg.sender, remainingAmount), "Token transfer failed");
+            if (!IERC20(_token).transfer(msg.sender, remainingAmount)) revert TokenTransferFailed(address(this), msg.sender, remainingAmount);
         }
     }
 
@@ -304,18 +396,18 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _orderId ID of the order to cancel
     function cancelOrder(uint256 _orderId) external nonReentrant {
         OrderInfo memory orderInfo = orderInfos[_orderId];
-        require(orderInfo.token != address(0), "Order not found");
+        if (orderInfo.token == address(0)) revert OrderNotFound(_orderId);
 
         Order storage order = activeOrdersByToken[orderInfo.token][orderInfo.index];
-        require(order.maker == msg.sender, "Not order maker");
+        if (order.maker != msg.sender) revert NotOrderMaker(msg.sender, order.maker);
 
         uint256 remainingAmount = order.amount - order.filled;
 
         if (order.isBuyOrder) {
             uint256 refundAmount = remainingAmount * order.price;
-            require(USDT.transfer(msg.sender, refundAmount), "USDT transfer failed");
+            if (!USDT.transfer(msg.sender, refundAmount)) revert UsdtTransferFailed(address(this), msg.sender, refundAmount);
         } else {
-            require(IERC20(orderInfo.token).transfer(msg.sender, remainingAmount), "Token transfer failed");
+            if (!IERC20(orderInfo.token).transfer(msg.sender, remainingAmount)) revert TokenTransferFailed(address(this), msg.sender, remainingAmount);
         }
 
         emit OrderCancelled(_orderId, order.maker, orderInfo.token, block.timestamp);
@@ -326,7 +418,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @dev Fee is in basis points (100 = 1%)
     /// @param _feePercent New fee percentage
     function setFeePercent(uint256 _feePercent) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_feePercent <= 200, "Max fee is 2%");
+        if (_feePercent > 200) revert FeeSetToHigh(_feePercent);
         feePercent = _feePercent;
     }
 
@@ -334,17 +426,17 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _to Address to send the withdrawn fees
     /// @param _amount Amount of fees to withdraw
     function withdrawFees(address _to, uint256 _amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_to != address(0), "Invalid address");
-        require(_amount > 0 && _amount <= collectedFees, "Invalid withdrawal amount");
+        if (_to == address(0)) revert ZeroAddress(_to);
+        if (_amount == 0 || _amount > collectedFees) revert InvalidUsdtAmount(_amount);
 
         collectedFees -= _amount;
-        require(USDT.transfer(_to, _amount), "USDT transfer failed");
+        if (!USDT.transfer(_to, _amount)) revert UsdtTransferFailed(address(this), _to, _amount);
     }
 
     /// @notice Returns all active orders for a given token
     /// @param _token Token contract address
     /// @return Array of active orders for the token
-    function getActiveOrders(address _token) external view returns (Order[] memory) {
+    function getActiveOrders(address _token) external view onlyListed(_token) returns (Order[] memory) {
         return activeOrdersByToken[_token];
     }
 
