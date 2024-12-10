@@ -41,4 +41,48 @@ describe('OrderBookDEX', function () {
       expect(await orderBookDEX.USDT()).to.equal(await USDT.getAddress());
     });
   });
+
+  describe('Token listing', function () {
+    it('Should allow PAIR_LISTER_ROLE to list a token', async function () {
+      const { orderBookDEX, ETH, owner } = await deployOrderBookDEXFixture();
+
+      await expect(orderBookDEX.listToken(await ETH.getAddress()))
+        .to.emit(orderBookDEX, 'TokenListed')
+        .withArgs(await ETH.getAddress(), 18, owner.address);
+    });
+
+    it('Should not allow non PAIR_LISTER_ROLE to list a token', async function () {
+      const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
+
+      await expect(orderBookDEX.connect(user1).listToken(await ETH.getAddress())).to.be.revertedWithCustomError(
+        orderBookDEX,
+        'AccessControlUnauthorizedAccount'
+      );
+    });
+
+    it('Should not allow listing of zero address', async function () {
+      const { orderBookDEX } = await deployOrderBookDEXFixture();
+
+      await expect(orderBookDEX.listToken(hre.ethers.ZeroAddress))
+        .to.be.revertedWithCustomError(orderBookDEX, 'ZeroAddress')
+        .withArgs(hre.ethers.ZeroAddress);
+    });
+
+    it('Should not allow listing an already listed token', async function () {
+      const { orderBookDEX, ETH } = await deployOrderBookDEXFixture();
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await expect(orderBookDEX.listToken(await ETH.getAddress()))
+        .to.be.revertedWithCustomError(orderBookDEX, 'TokenAlreadyListed')
+        .withArgs(await ETH.getAddress());
+    });
+
+    it('Should not allow listing USDT as a trading token pair', async function () {
+      const { orderBookDEX, USDT } = await deployOrderBookDEXFixture();
+
+      await expect(orderBookDEX.listToken(await USDT.getAddress()))
+        .to.be.revertedWithCustomError(orderBookDEX, 'CannotListUsdt')
+        .withArgs(await USDT.getAddress());
+    });
+  });
 });
