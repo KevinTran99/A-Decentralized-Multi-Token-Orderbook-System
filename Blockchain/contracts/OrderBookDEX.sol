@@ -151,18 +151,6 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param token The USDT token address
     error CannotListUsdt(address token);
 
-    /// @notice Error thrown when USDT transfer fails
-    /// @param from Address attempting to send USDT
-    /// @param to Address intended to receive USDT
-    /// @param amount Amount of USDT being transferred
-    error UsdtTransferFailed(address from, address to, uint256 amount);
-
-    /// @notice Error thrown when token transfer fails
-    /// @param from Address attempting to send tokens
-    /// @param to Address intended to receive tokens
-    /// @param amount Amount of tokens being transferred
-    error TokenTransferFailed(address from, address to, uint256 amount);
-
     /// @notice Error thrown when order ID does not exist
     /// @param order The order ID that was not found
     error OrderNotFound(uint256 order);
@@ -256,7 +244,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @return orderId Unique identifier for the created order
     function createBuyOrder(address _token, uint256 _price, uint256 _amount) external onlyListed(_token) validPrice(_price) validAmount(_amount) nonReentrant returns (uint256) {
         uint256 totalCost = _price * _amount;
-        if (!USDT.transferFrom(msg.sender, address(this), totalCost)) revert UsdtTransferFailed(msg.sender, address(this), totalCost);
+        USDT.transferFrom(msg.sender, address(this), totalCost);
 
         return _createOrder(_token, true, _price, _amount);
     }
@@ -268,7 +256,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _amount Amount of tokens to sell
     /// @return orderId Unique identifier for the created order
     function createSellOrder(address _token, uint256 _price, uint256 _amount) external onlyListed(_token) validPrice(_price) validAmount(_amount) nonReentrant returns (uint256) {
-        if (!IERC20(_token).transferFrom(msg.sender, address(this), _amount)) revert TokenTransferFailed(msg.sender, address(this), _amount);
+        IERC20(_token).transferFrom(msg.sender, address(this), _amount);
 
         return _createOrder(_token, false, _price, _amount);
     }
@@ -282,7 +270,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         if (_orderIds.length != _amounts.length) revert ArrayLengthsMismatch(_orderIds.length, _amounts.length);
         if (_totalUsdt == 0) revert InvalidUsdtAmount(_totalUsdt);
 
-        if (!USDT.transferFrom(msg.sender, address(this), _totalUsdt)) revert UsdtTransferFailed(msg.sender, address(this), _totalUsdt);
+        USDT.transferFrom(msg.sender, address(this), _totalUsdt);
 
         uint256 remainingUsdt = _totalUsdt;
         uint256 ordersMatched;
@@ -316,8 +304,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             collectedFees += fee;
             ordersMatched++;
 
-            if (!USDT.transfer(order.maker, orderCost)) revert UsdtTransferFailed(address(this), order.maker, orderCost);
-            if (!IERC20(order.token).transfer(msg.sender, amountWanted)) revert TokenTransferFailed(address(this), msg.sender, amountWanted);
+            USDT.transfer(order.maker, orderCost);
+            IERC20(order.token).transfer(msg.sender, amountWanted);
 
             emit OrderFilled(order.orderId, order.maker, msg.sender, order.token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
 
@@ -329,7 +317,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         if (ordersMatched == 0) revert NoOrdersMatched();
 
         if (remainingUsdt > 0) {
-            if (!USDT.transfer(msg.sender, remainingUsdt)) revert UsdtTransferFailed(address(this), msg.sender, remainingUsdt);
+            USDT.transfer(msg.sender, remainingUsdt);
         }
     }
 
@@ -343,7 +331,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         if (_orderIds.length != _amounts.length) revert ArrayLengthsMismatch(_orderIds.length, _amounts.length);
         if (_totalTokens == 0) revert InvalidTokenAmount(_totalTokens);
 
-        if (!IERC20(_token).transferFrom(msg.sender, address(this), _totalTokens)) revert TokenTransferFailed(msg.sender, address(this), _totalTokens);
+        IERC20(_token).transferFrom(msg.sender, address(this), _totalTokens);
 
         uint256 remainingAmount = _totalTokens;
         uint256 ordersMatched;
@@ -374,8 +362,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             collectedFees += fee;
             ordersMatched++;
 
-            if (!IERC20(_token).transfer(order.maker, amountWanted)) revert TokenTransferFailed(address(this), order.maker, amountWanted);
-            if (!USDT.transfer(msg.sender, orderCost - fee)) revert UsdtTransferFailed(address(this), msg.sender, orderCost - fee);
+            IERC20(_token).transfer(order.maker, amountWanted);
+            USDT.transfer(msg.sender, orderCost - fee);
 
             emit OrderFilled(order.orderId, order.maker, msg.sender, _token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
 
@@ -387,7 +375,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         if (ordersMatched == 0) revert NoOrdersMatched();
 
         if (remainingAmount > 0) {
-            if (!IERC20(_token).transfer(msg.sender, remainingAmount)) revert TokenTransferFailed(address(this), msg.sender, remainingAmount);
+            IERC20(_token).transfer(msg.sender, remainingAmount);
         }
     }
 
@@ -405,9 +393,9 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
 
         if (order.isBuyOrder) {
             uint256 refundAmount = remainingAmount * order.price;
-            if (!USDT.transfer(msg.sender, refundAmount)) revert UsdtTransferFailed(address(this), msg.sender, refundAmount);
+            USDT.transfer(msg.sender, refundAmount);
         } else {
-            if (!IERC20(orderInfo.token).transfer(msg.sender, remainingAmount)) revert TokenTransferFailed(address(this), msg.sender, remainingAmount);
+            IERC20(orderInfo.token).transfer(msg.sender, remainingAmount);
         }
 
         emit OrderCancelled(_orderId, order.maker, orderInfo.token, block.timestamp);
@@ -430,7 +418,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         if (_amount == 0 || _amount > collectedFees) revert InvalidUsdtAmount(_amount);
 
         collectedFees -= _amount;
-        if (!USDT.transfer(_to, _amount)) revert UsdtTransferFailed(address(this), _to, _amount);
+        USDT.transfer(_to, _amount);
     }
 
     /// @notice Returns all active orders for a given token
