@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
+import { time } from '@nomicfoundation/hardhat-network-helpers';
 
 describe('OrderBookDEX', function () {
   async function deployOrderBookDEXFixture() {
@@ -83,6 +84,110 @@ describe('OrderBookDEX', function () {
       await expect(orderBookDEX.listToken(await USDT.getAddress()))
         .to.be.revertedWithCustomError(orderBookDEX, 'CannotListUsdt')
         .withArgs(await USDT.getAddress());
+    });
+  });
+
+  describe('Create buy order', function () {
+    it('Should create a buy order with valid parameters', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+
+      await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount))
+        .to.emit(orderBookDEX, 'OrderCreated')
+        .withArgs(1, user1.address, await ETH.getAddress(), true, price, amount, await time.latest());
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(1);
+      expect(orders[0].orderId).to.equal(1);
+      expect(orders[0].maker).to.equal(user1.address);
+      expect(orders[0].token).to.equal(await ETH.getAddress());
+      expect(orders[0].isBuyOrder).to.be.true;
+      expect(orders[0].price).to.equal(price);
+      expect(orders[0].amount).to.equal(amount);
+      expect(orders[0].filled).to.equal(0);
+    });
+
+    it('Should revert when creating buy order for unlisted token', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+
+      await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount))
+        .to.be.revertedWithCustomError(orderBookDEX, 'TokenNotListed')
+        .withArgs(await ETH.getAddress());
+    });
+
+    it('Should revert when creating buy order with zero price', async function () {
+      const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
+      const amount = 1n;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+
+      await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), 0, amount))
+        .to.be.revertedWithCustomError(orderBookDEX, 'InvalidPrice')
+        .withArgs(0);
+    });
+
+    it('Should revert when creating buy order with zero amount', async function () {
+      const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+
+      await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, 0))
+        .to.be.revertedWithCustomError(orderBookDEX, 'InvalidAmount')
+        .withArgs(0);
+    });
+
+    it('Should revert when creating buy order with insufficient USDT allowance', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+
+      await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount))
+        .to.be.revertedWithCustomError(USDT, 'ERC20InsufficientAllowance')
+        .withArgs(await orderBookDEX.getAddress(), 0, totalCost);
+    });
+
+    it('Should revert when creating buy order with insufficient USDT balance', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1000n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+
+      await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount))
+        .to.be.revertedWithCustomError(USDT, 'ERC20InsufficientBalance')
+        .withArgs(user1.address, await USDT.balanceOf(user1.address), totalCost);
+    });
+
+    it('Should increment order ID after successful creation', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+
+      expect(await orderBookDEX.orderId()).to.equal(0);
+
+      await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
+
+      expect(await orderBookDEX.orderId()).to.equal(1);
     });
   });
 });
