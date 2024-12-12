@@ -683,4 +683,253 @@ describe('OrderBookDEX', function () {
       expect(finalBalance).to.equal(initialBalance - amount);
     });
   });
+
+  describe('Cancel order', function () {
+    it('Should cancel buy order and refund USDT', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
+
+      const initialBalance = await USDT.balanceOf(user1.address);
+
+      await expect(orderBookDEX.connect(user1).cancelOrder(1))
+        .to.emit(orderBookDEX, 'OrderCancelled')
+        .withArgs(1, user1.address, await ETH.getAddress(), (await time.latest()) + 1);
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(0);
+      expect(await USDT.balanceOf(user1.address)).to.equal(initialBalance + totalCost);
+    });
+
+    it('Should cancel sell order and refund tokens', async function () {
+      const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
+      await orderBookDEX.connect(user1).createSellOrder(await ETH.getAddress(), price, amount);
+
+      const initialBalance = await ETH.balanceOf(user1.address);
+
+      await expect(orderBookDEX.connect(user1).cancelOrder(1))
+        .to.emit(orderBookDEX, 'OrderCancelled')
+        .withArgs(1, user1.address, await ETH.getAddress(), (await time.latest()) + 1);
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(0);
+      expect(await ETH.balanceOf(user1.address)).to.equal(initialBalance + amount);
+    });
+
+    it('Should cancel partially filled buy order and refund remaining USDT', async function () {
+      const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const buyAmount = 2n;
+      const sellAmount = 1n;
+      const totalCost = price * buyAmount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, buyAmount);
+
+      await ETH.connect(user2).approve(await orderBookDEX.getAddress(), sellAmount);
+      await orderBookDEX.connect(user2).marketSell([1], [sellAmount], await ETH.getAddress(), sellAmount);
+
+      const initialBalance = await USDT.balanceOf(user1.address);
+
+      await expect(orderBookDEX.connect(user1).cancelOrder(1))
+        .to.emit(orderBookDEX, 'OrderCancelled')
+        .withArgs(1, user1.address, await ETH.getAddress(), (await time.latest()) + 1);
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(0);
+      expect(await USDT.balanceOf(user1.address)).to.equal(initialBalance + price * (buyAmount - sellAmount));
+    });
+
+    it('Should cancel partially filled sell order and refund remaining tokens', async function () {
+      const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const sellAmount = 2n;
+      const buyAmount = 1n;
+      const totalCost = price * buyAmount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await ETH.connect(user1).approve(await orderBookDEX.getAddress(), sellAmount);
+      await orderBookDEX.connect(user1).createSellOrder(await ETH.getAddress(), price, sellAmount);
+
+      await USDT.connect(user2).approve(await orderBookDEX.getAddress(), totalCost);
+      await orderBookDEX.connect(user2).marketBuy([1], [buyAmount], totalCost);
+
+      const initialBalance = await ETH.balanceOf(user1.address);
+
+      await expect(orderBookDEX.connect(user1).cancelOrder(1))
+        .to.emit(orderBookDEX, 'OrderCancelled')
+        .withArgs(1, user1.address, await ETH.getAddress(), (await time.latest()) + 1);
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(0);
+      expect(await ETH.balanceOf(user1.address)).to.equal(initialBalance + (sellAmount - buyAmount));
+    });
+
+    it('Should revert when canceling non-existent order', async function () {
+      const { orderBookDEX } = await deployOrderBookDEXFixture();
+
+      await expect(orderBookDEX.cancelOrder(999))
+        .to.be.revertedWithCustomError(orderBookDEX, 'OrderNotFound')
+        .withArgs(999);
+    });
+
+    it('Should revert when non-maker attempts to cancel order', async function () {
+      const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
+
+      await expect(orderBookDEX.connect(user2).cancelOrder(1))
+        .to.be.revertedWithCustomError(orderBookDEX, 'NotOrderMaker')
+        .withArgs(user2.address, user1.address);
+    });
+  });
+
+  describe('Fee management', function () {
+    describe('Set fee percent', function () {
+      it('Should allow admin to set fee percent', async function () {
+        const { orderBookDEX } = await deployOrderBookDEXFixture();
+        const newFeePercent = 100n;
+
+        await orderBookDEX.setFeePercent(newFeePercent);
+
+        expect(await orderBookDEX.feePercent()).to.equal(newFeePercent);
+      });
+
+      it('Should revert when fee is set too high', async function () {
+        const { orderBookDEX } = await deployOrderBookDEXFixture();
+        const highFeePercent = 201n;
+
+        await expect(orderBookDEX.setFeePercent(highFeePercent))
+          .to.be.revertedWithCustomError(orderBookDEX, 'FeeSetToHigh')
+          .withArgs(highFeePercent);
+      });
+
+      it('Should revert when non-admin tries to set fee percent', async function () {
+        const { orderBookDEX, user1 } = await deployOrderBookDEXFixture();
+        const newFeePercent = 100n;
+
+        await expect(orderBookDEX.connect(user1).setFeePercent(newFeePercent)).to.be.revertedWithCustomError(
+          orderBookDEX,
+          'AccessControlUnauthorizedAccount'
+        );
+      });
+    });
+
+    describe('Fee collection and withdrawal', function () {
+      it('Should collect fees from market buy orders', async function () {
+        const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
+        const price = hre.ethers.parseUnits('4000', 6);
+        const amount = 1n;
+        const totalCost = price * amount;
+        const feePercent = 100n;
+        const expectedFee = (totalCost * feePercent) / 10000n;
+
+        await orderBookDEX.setFeePercent(feePercent);
+        await orderBookDEX.listToken(await ETH.getAddress());
+        await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
+        await orderBookDEX.connect(user1).createSellOrder(await ETH.getAddress(), price, amount);
+        await USDT.connect(user2).approve(await orderBookDEX.getAddress(), totalCost + expectedFee);
+
+        await orderBookDEX.connect(user2).marketBuy([1], [amount], totalCost + expectedFee);
+
+        expect(await orderBookDEX.collectedFees()).to.equal(expectedFee);
+        expect(await USDT.balanceOf(user1.address)).to.equal(hre.ethers.parseUnits('10000', 6) + totalCost);
+      });
+
+      it('Should collect fees from market sell orders', async function () {
+        const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
+        const price = hre.ethers.parseUnits('4000', 6);
+        const amount = 1n;
+        const totalCost = price * amount;
+        const feePercent = 100n;
+        const expectedFee = (totalCost * feePercent) / 10000n;
+
+        await orderBookDEX.setFeePercent(feePercent);
+        await orderBookDEX.listToken(await ETH.getAddress());
+        await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+        await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
+        await ETH.connect(user2).approve(await orderBookDEX.getAddress(), amount);
+
+        await orderBookDEX.connect(user2).marketSell([1], [amount], await ETH.getAddress(), amount);
+
+        expect(await orderBookDEX.collectedFees()).to.equal(expectedFee);
+        expect(await USDT.balanceOf(user2.address)).to.equal(
+          hre.ethers.parseUnits('10000', 6) + totalCost - expectedFee
+        );
+      });
+
+      it('Should allow admin to withdraw collected fees', async function () {
+        const { orderBookDEX, ETH, USDT, owner, user1, user2 } = await deployOrderBookDEXFixture();
+        const price = hre.ethers.parseUnits('4000', 6);
+        const amount = 1n;
+        const totalCost = price * amount;
+        const feePercent = 100n;
+        const expectedFee = (totalCost * feePercent) / 10000n;
+
+        await orderBookDEX.setFeePercent(feePercent);
+        await orderBookDEX.listToken(await ETH.getAddress());
+        await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
+        await orderBookDEX.connect(user1).createSellOrder(await ETH.getAddress(), price, amount);
+        await USDT.connect(user2).approve(await orderBookDEX.getAddress(), totalCost + expectedFee);
+        await orderBookDEX.connect(user2).marketBuy([1], [amount], totalCost + expectedFee);
+
+        const initialBalance = await USDT.balanceOf(owner.address);
+        await orderBookDEX.withdrawFees(owner.address, expectedFee);
+
+        expect(await orderBookDEX.collectedFees()).to.equal(0);
+        expect(await USDT.balanceOf(owner.address)).to.equal(initialBalance + expectedFee);
+      });
+
+      it('Should revert when withdrawing more than collected fees', async function () {
+        const { orderBookDEX, owner } = await deployOrderBookDEXFixture();
+        const withdrawAmount = hre.ethers.parseUnits('1', 6);
+
+        await expect(orderBookDEX.withdrawFees(owner.address, withdrawAmount))
+          .to.be.revertedWithCustomError(orderBookDEX, 'InvalidUsdtAmount')
+          .withArgs(withdrawAmount);
+      });
+
+      it('Should revert when non-admin tries to withdraw fees', async function () {
+        const { orderBookDEX, user1 } = await deployOrderBookDEXFixture();
+        const withdrawAmount = hre.ethers.parseUnits('1', 6);
+
+        await expect(
+          orderBookDEX.connect(user1).withdrawFees(user1.address, withdrawAmount)
+        ).to.be.revertedWithCustomError(orderBookDEX, 'AccessControlUnauthorizedAccount');
+      });
+
+      it('Should revert when withdrawing to zero address', async function () {
+        const { orderBookDEX } = await deployOrderBookDEXFixture();
+        const withdrawAmount = hre.ethers.parseUnits('1', 6);
+
+        await expect(orderBookDEX.withdrawFees(hre.ethers.ZeroAddress, withdrawAmount))
+          .to.be.revertedWithCustomError(orderBookDEX, 'ZeroAddress')
+          .withArgs(hre.ethers.ZeroAddress);
+      });
+
+      it('Should revert when withdrawing zero amount', async function () {
+        const { orderBookDEX, owner } = await deployOrderBookDEXFixture();
+
+        await expect(orderBookDEX.withdrawFees(owner.address, 0))
+          .to.be.revertedWithCustomError(orderBookDEX, 'InvalidUsdtAmount')
+          .withArgs(0);
+      });
+    });
+  });
 });
