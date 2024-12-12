@@ -932,4 +932,89 @@ describe('OrderBookDEX', function () {
       });
     });
   });
+
+  describe('Get active orders', function () {
+    it('Should return all active orders for token', async function () {
+      const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await ETH.connect(user2).approve(await orderBookDEX.getAddress(), amount);
+
+      await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
+      await orderBookDEX.connect(user2).createSellOrder(await ETH.getAddress(), price, amount);
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(2);
+      expect(orders[0].maker).to.equal(user1.address);
+      expect(orders[0].isBuyOrder).to.be.true;
+      expect(orders[1].maker).to.equal(user2.address);
+      expect(orders[1].isBuyOrder).to.be.false;
+    });
+
+    it('Should return empty array for token with no orders', async function () {
+      const { orderBookDEX, ETH } = await deployOrderBookDEXFixture();
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(0);
+    });
+
+    it('Should not return filled orders', async function () {
+      const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = 1n;
+      const totalCost = price * amount;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await ETH.connect(user2).approve(await orderBookDEX.getAddress(), amount);
+
+      await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
+      await orderBookDEX.connect(user2).marketSell([1], [amount], await ETH.getAddress(), amount);
+
+      const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
+      expect(orders.length).to.equal(0);
+    });
+
+    it('Should revert when querying unlisted token', async function () {
+      const { orderBookDEX, ETH } = await deployOrderBookDEXFixture();
+
+      await expect(orderBookDEX.getActiveOrders(await ETH.getAddress()))
+        .to.be.revertedWithCustomError(orderBookDEX, 'TokenNotListed')
+        .withArgs(await ETH.getAddress());
+    });
+  });
+
+  describe('Special functions', function () {
+    describe('Fallback function', function () {
+      it('Should revert when calling non-existent function', async function () {
+        const { orderBookDEX, user1 } = await deployOrderBookDEXFixture();
+
+        await expect(
+          user1.sendTransaction({
+            to: await orderBookDEX.getAddress(),
+            data: '0x12345678',
+          })
+        ).to.be.reverted;
+      });
+    });
+
+    describe('Receive function', function () {
+      it('Should revert when sending ETH directly to the contract', async function () {
+        const { orderBookDEX, user1 } = await deployOrderBookDEXFixture();
+
+        await expect(
+          user1.sendTransaction({
+            to: await orderBookDEX.getAddress(),
+            value: hre.ethers.parseEther('1.0'),
+          })
+        ).to.be.reverted;
+      });
+    });
+  });
 });
