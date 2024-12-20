@@ -243,7 +243,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// @param _amount Amount of tokens to buy
     /// @return orderId Unique identifier for the created order
     function createBuyOrder(address _token, uint256 _price, uint256 _amount) external onlyListed(_token) validPrice(_price) validAmount(_amount) nonReentrant returns (uint256) {
-        uint256 totalCost = _price * _amount;
+        uint256 decimals = listedTokens[_token].decimals;
+        uint256 totalCost = _price * (_amount / (10 ** decimals));
         USDT.transferFrom(msg.sender, address(this), totalCost);
 
         return _createOrder(_token, true, _price, _amount);
@@ -292,7 +293,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
                 continue;
             }
 
-            uint256 orderCost = amountWanted * order.price;
+            uint256 decimals = listedTokens[order.token].decimals;
+            uint256 orderCost = order.price * (amountWanted / (10 ** decimals));
             uint256 fee = (orderCost * feePercent) / 10000;
             
             if (orderCost + fee > remainingUsdt) {
@@ -354,7 +356,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
                 continue;
             }
 
-            uint256 orderCost = amountWanted * order.price;
+            uint decimals = listedTokens[order.token].decimals;
+            uint256 orderCost = order.price * (amountWanted / 10 ** decimals);
             uint256 fee = (orderCost * feePercent) / 10000;
             
             order.filled += amountWanted;
