@@ -5,8 +5,6 @@ class Orderbook {
   }
 
   processOrders(activeOrders) {
-    this.ordersByToken.clear();
-    this.orderMap.clear();
     activeOrders.forEach(order => this.addOrder(order));
   }
 
