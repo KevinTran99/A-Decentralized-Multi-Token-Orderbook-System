@@ -14,7 +14,7 @@ describe('OrderBookDEX', function () {
     const orderBookDEX = await OrderBookDEX.deploy(await USDT.getAddress());
 
     const usdtAmount = hre.ethers.parseUnits('10000', 6);
-    const ethAmount = 1000n;
+    const ethAmount = hre.ethers.parseUnits('1000', 18);
 
     await USDT.transfer(user1.address, usdtAmount);
     await USDT.transfer(user2.address, usdtAmount);
@@ -87,19 +87,82 @@ describe('OrderBookDEX', function () {
     });
   });
 
+  describe('Token unlisting', function () {
+    it('Should allow DEFAULT_ADMIN_ROLE to unlist a token', async function () {
+      const { orderBookDEX, ETH, owner } = await deployOrderBookDEXFixture();
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await expect(orderBookDEX.unlistToken(await ETH.getAddress()))
+        .to.emit(orderBookDEX, 'TokenUnlisted')
+        .withArgs(await ETH.getAddress(), owner.address);
+
+      const tokenInfo = await orderBookDEX.listedTokens(await ETH.getAddress());
+      expect(tokenInfo.isListed).to.be.false;
+    });
+
+    it('Should not allow non DEFAULT_ADMIN_ROLE to unlist a token', async function () {
+      const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await expect(orderBookDEX.connect(user1).unlistToken(await ETH.getAddress())).to.be.revertedWithCustomError(
+        orderBookDEX,
+        'AccessControlUnauthorizedAccount'
+      );
+    });
+
+    it('Should not allow unlisting a non-listed token', async function () {
+      const { orderBookDEX, ETH } = await deployOrderBookDEXFixture();
+
+      await expect(orderBookDEX.unlistToken(await ETH.getAddress()))
+        .to.be.revertedWithCustomError(orderBookDEX, 'TokenNotListed')
+        .withArgs(await ETH.getAddress());
+    });
+
+    it('Should allow orders to be cancelled after token is unlisted', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
+      await orderBookDEX.unlistToken(await ETH.getAddress());
+
+      await expect(orderBookDEX.connect(user1).cancelOrder(1))
+        .to.emit(orderBookDEX, 'OrderCancelled')
+        .withArgs(1, user1.address, await ETH.getAddress(), await time.latest());
+    });
+
+    it('Should prevent new orders after token is unlisted', async function () {
+      const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
+      const price = hre.ethers.parseUnits('4000', 6);
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
+
+      await orderBookDEX.listToken(await ETH.getAddress());
+      await orderBookDEX.unlistToken(await ETH.getAddress());
+
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount))
+        .to.be.revertedWithCustomError(orderBookDEX, 'TokenNotListed')
+        .withArgs(await ETH.getAddress());
+    });
+  });
+
   describe('Create buy order', function () {
     it('Should create a buy order with valid parameters', async function () {
       const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
 
       await expect(orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount))
         .to.emit(orderBookDEX, 'OrderCreated')
-        .withArgs(1, user1.address, await ETH.getAddress(), true, price, amount, await time.latest());
+        .withArgs(1, user1.address, await ETH.getAddress(), true, price, amount, (await time.latest()) + 1);
 
       const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
       expect(orders.length).to.equal(1);
@@ -115,8 +178,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when creating buy order for unlisted token', async function () {
       const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
 
@@ -127,7 +190,7 @@ describe('OrderBookDEX', function () {
 
     it('Should revert when creating buy order with zero price', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
 
       await orderBookDEX.listToken(await ETH.getAddress());
 
@@ -150,8 +213,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when creating buy order with insufficient USDT allowance', async function () {
       const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
 
@@ -163,8 +226,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when creating buy order with insufficient USDT balance', async function () {
       const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1000n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1000', 18);
+      const totalCost = price * 1000n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -177,8 +240,8 @@ describe('OrderBookDEX', function () {
     it('Should increment order ID after successful creation', async function () {
       const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -195,7 +258,7 @@ describe('OrderBookDEX', function () {
     it('Should create a sell order with valid parameters', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -218,7 +281,7 @@ describe('OrderBookDEX', function () {
     it('Should revert when creating sell order for unlisted token', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
 
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
 
@@ -229,7 +292,7 @@ describe('OrderBookDEX', function () {
 
     it('Should revert when creating sell order with zero price', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
 
       await orderBookDEX.listToken(await ETH.getAddress());
 
@@ -252,7 +315,7 @@ describe('OrderBookDEX', function () {
     it('Should revert when creating sell order with insufficient token allowance', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
 
       await orderBookDEX.listToken(await ETH.getAddress());
 
@@ -264,7 +327,7 @@ describe('OrderBookDEX', function () {
     it('Should revert when creating sell order with insufficient token balance', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 10000n;
+      const amount = hre.ethers.parseUnits('10000', 18);
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -277,7 +340,7 @@ describe('OrderBookDEX', function () {
     it('Should increment order ID after successful creation', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -294,8 +357,8 @@ describe('OrderBookDEX', function () {
     it('Should execute market buy with valid parameters', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -316,15 +379,15 @@ describe('OrderBookDEX', function () {
           (await time.latest()) + 1
         );
 
-      expect(await ETH.balanceOf(user2.address)).to.equal(1000n + amount);
+      expect(await ETH.balanceOf(user2.address)).to.equal(hre.ethers.parseUnits('1000', 18) + amount);
     });
 
     it('Should handle partial fills correctly', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const sellAmount = 5n;
-      const buyAmount = 2n;
-      const totalCost = price * buyAmount;
+      const sellAmount = hre.ethers.parseUnits('5', 18);
+      const buyAmount = hre.ethers.parseUnits('2', 18);
+      const totalCost = price * 2n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), sellAmount);
@@ -339,15 +402,15 @@ describe('OrderBookDEX', function () {
       expect(orders[0].amount).to.equal(sellAmount);
       expect(orders[0].filled).to.equal(buyAmount);
 
-      expect(await ETH.balanceOf(user2.address)).to.equal(1000n + buyAmount);
-      expect(await USDT.balanceOf(user1.address)).to.equal(hre.ethers.parseUnits('10000', 6) + price * buyAmount);
+      expect(await ETH.balanceOf(user2.address)).to.equal(hre.ethers.parseUnits('1000', 18) + buyAmount);
+      expect(await USDT.balanceOf(user1.address)).to.equal(hre.ethers.parseUnits('10000', 6) + price * 2n);
     });
 
     it('Should revert when executing market buy with order IDs and amounts arrays of different lengths', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -362,8 +425,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market buy with zero total USDT amount', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -378,8 +441,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market buy with insufficient USDT allowance', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -393,8 +456,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market buy with insufficient USDT balance', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1000n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1000', 18);
+      const totalCost = price * 1000n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -409,8 +472,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market buy with no orders matched', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -426,9 +489,9 @@ describe('OrderBookDEX', function () {
     it('Should skip orders when trying to fill more than available', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const sellAmount = 1n;
-      const buyAmount = 2n;
-      const totalCost = price * buyAmount;
+      const sellAmount = hre.ethers.parseUnits('1', 18);
+      const buyAmount = hre.ethers.parseUnits('2', 18);
+      const totalCost = price * 2n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), sellAmount);
@@ -449,8 +512,8 @@ describe('OrderBookDEX', function () {
     it('Should only execute as many orders as the user has sufficient USDT for', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount * 2n);
@@ -461,7 +524,7 @@ describe('OrderBookDEX', function () {
       await orderBookDEX.connect(user2).marketBuy([1, 2], [amount, amount], totalCost);
 
       const finalBalance = await ETH.balanceOf(user2.address);
-      expect(finalBalance).to.equal(1000n + amount);
+      expect(finalBalance).to.equal(hre.ethers.parseUnits('1000', 18) + amount);
 
       const orderIndex = Number((await orderBookDEX.orderInfos(2)).index);
       const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
@@ -472,7 +535,7 @@ describe('OrderBookDEX', function () {
     it('Should refund any excess USDT', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
       const totalCost = price * 2n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
@@ -484,7 +547,7 @@ describe('OrderBookDEX', function () {
       await orderBookDEX.connect(user2).marketBuy([1], [amount], totalCost);
       const finalBalance = await USDT.balanceOf(user2.address);
 
-      expect(finalBalance).to.equal(initialBalance - price * amount);
+      expect(finalBalance).to.equal(initialBalance - price);
     });
   });
 
@@ -492,8 +555,8 @@ describe('OrderBookDEX', function () {
     it('Should execute market sell with valid parameters', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -520,9 +583,9 @@ describe('OrderBookDEX', function () {
     it('Should handle partial fills correctly', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const buyAmount = 2n;
-      const sellAmount = 1n;
-      const totalCost = price * buyAmount;
+      const buyAmount = hre.ethers.parseUnits('2', 18);
+      const sellAmount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price * 2n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -537,15 +600,15 @@ describe('OrderBookDEX', function () {
       expect(orders[0].amount).to.equal(buyAmount);
       expect(orders[0].filled).to.equal(sellAmount);
 
-      expect(await USDT.balanceOf(user2.address)).to.equal(hre.ethers.parseUnits('10000', 6) + price * sellAmount);
-      expect(await ETH.balanceOf(user1.address)).to.equal(1000n + sellAmount);
+      expect(await USDT.balanceOf(user2.address)).to.equal(hre.ethers.parseUnits('10000', 6) + price);
+      expect(await ETH.balanceOf(user1.address)).to.equal(hre.ethers.parseUnits('1000', 18) + sellAmount);
     });
 
     it('Should revert when executing market sell with order IDs and amounts arrays of different lengths', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -560,8 +623,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market sell with zero total token amount', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -576,8 +639,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market sell with insufficient token allowance', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -591,8 +654,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market sell with insufficient token balance', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4', 6);
-      const amount = 2000n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('2000', 18);
+      const totalCost = price * 2000n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -607,8 +670,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when executing market sell with no orders matched', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -623,9 +686,9 @@ describe('OrderBookDEX', function () {
     it('Should skip orders when trying to fill more than available', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const buyAmount = 1n;
-      const sellAmount = 2n;
-      const totalCost = price * buyAmount;
+      const buyAmount = hre.ethers.parseUnits('1', 18);
+      const sellAmount = hre.ethers.parseUnits('2', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -645,8 +708,8 @@ describe('OrderBookDEX', function () {
     it('Should only execute as many orders as the user has sufficient tokens for', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount * 2n;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price * 2n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -656,8 +719,7 @@ describe('OrderBookDEX', function () {
 
       await orderBookDEX.connect(user2).marketSell([1, 2], [amount, amount], await ETH.getAddress(), amount);
 
-      const finalBalance = await USDT.balanceOf(user2.address);
-      expect(finalBalance).to.equal(hre.ethers.parseUnits('10000', 6) + price * amount);
+      expect(await USDT.balanceOf(user2.address)).to.equal(hre.ethers.parseUnits('10000', 6) + price);
 
       const orderIndex = Number((await orderBookDEX.orderInfos(2)).index);
       const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
@@ -668,8 +730,8 @@ describe('OrderBookDEX', function () {
     it('Should refund any excess tokens', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -688,8 +750,8 @@ describe('OrderBookDEX', function () {
     it('Should cancel buy order and refund USDT', async function () {
       const { orderBookDEX, ETH, USDT, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -709,7 +771,7 @@ describe('OrderBookDEX', function () {
     it('Should cancel sell order and refund tokens', async function () {
       const { orderBookDEX, ETH, user1 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
+      const amount = hre.ethers.parseUnits('1', 18);
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
@@ -729,9 +791,9 @@ describe('OrderBookDEX', function () {
     it('Should cancel partially filled buy order and refund remaining USDT', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const buyAmount = 2n;
-      const sellAmount = 1n;
-      const totalCost = price * buyAmount;
+      const buyAmount = hre.ethers.parseUnits('2', 18);
+      const sellAmount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price * 2n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -748,15 +810,15 @@ describe('OrderBookDEX', function () {
 
       const orders = await orderBookDEX.getActiveOrders(await ETH.getAddress());
       expect(orders.length).to.equal(0);
-      expect(await USDT.balanceOf(user1.address)).to.equal(initialBalance + price * (buyAmount - sellAmount));
+      expect(await USDT.balanceOf(user1.address)).to.equal(initialBalance + price);
     });
 
     it('Should cancel partially filled sell order and refund remaining tokens', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const sellAmount = 2n;
-      const buyAmount = 1n;
-      const totalCost = price * buyAmount;
+      const sellAmount = hre.ethers.parseUnits('2', 18);
+      const buyAmount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), sellAmount);
@@ -787,8 +849,8 @@ describe('OrderBookDEX', function () {
     it('Should revert when non-maker attempts to cancel order', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -835,8 +897,8 @@ describe('OrderBookDEX', function () {
       it('Should collect fees from market buy orders', async function () {
         const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
         const price = hre.ethers.parseUnits('4000', 6);
-        const amount = 1n;
-        const totalCost = price * amount;
+        const amount = hre.ethers.parseUnits('1', 18);
+        const totalCost = price;
         const feePercent = 100n;
         const expectedFee = (totalCost * feePercent) / 10000n;
 
@@ -855,8 +917,8 @@ describe('OrderBookDEX', function () {
       it('Should collect fees from market sell orders', async function () {
         const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
         const price = hre.ethers.parseUnits('4000', 6);
-        const amount = 1n;
-        const totalCost = price * amount;
+        const amount = hre.ethers.parseUnits('1', 18);
+        const totalCost = price;
         const feePercent = 100n;
         const expectedFee = (totalCost * feePercent) / 10000n;
 
@@ -877,8 +939,8 @@ describe('OrderBookDEX', function () {
       it('Should allow admin to withdraw collected fees', async function () {
         const { orderBookDEX, ETH, USDT, owner, user1, user2 } = await deployOrderBookDEXFixture();
         const price = hre.ethers.parseUnits('4000', 6);
-        const amount = 1n;
-        const totalCost = price * amount;
+        const amount = hre.ethers.parseUnits('1', 18);
+        const totalCost = price;
         const feePercent = 100n;
         const expectedFee = (totalCost * feePercent) / 10000n;
 
@@ -937,8 +999,8 @@ describe('OrderBookDEX', function () {
     it('Should return all active orders for token', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
@@ -967,8 +1029,8 @@ describe('OrderBookDEX', function () {
     it('Should not return filled orders', async function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
-      const amount = 1n;
-      const totalCost = price * amount;
+      const amount = hre.ethers.parseUnits('1', 18);
+      const totalCost = price;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
