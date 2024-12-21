@@ -395,7 +395,8 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         uint256 remainingAmount = order.amount - order.filled;
 
         if (order.isBuyOrder) {
-            uint256 refundAmount = remainingAmount * order.price;
+            uint256 decimals = listedTokens[orderInfo.token].decimals;
+            uint256 refundAmount = order.price * (remainingAmount / (10 ** decimals));
             USDT.transfer(msg.sender, refundAmount);
         } else {
             IERC20(orderInfo.token).transfer(msg.sender, remainingAmount);
