@@ -75,6 +75,11 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// Address of the account that listed the token
     event TokenListed(address indexed token, uint8 decimals, address indexed lister);
 
+    /// @notice Emitted when a token is unlisted from trading
+    /// Token contract address that was unlisted
+    /// Address of the account that unlisted the token
+    event TokenUnlisted(address indexed token, address indexed unlister);
+
     /// @notice Emitted when a new order is created
     /// Unique identifier of the created order
     /// Address that created the order
@@ -234,6 +239,15 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         });
         
         emit TokenListed(_token, tokenDecimals, msg.sender);
+    }
+
+    /// @notice Unlists a token from trading against USDT
+    /// @dev Existing orders can still be cancelled and filled
+    /// @param _token Token contract address
+    function unlistToken(address _token) external onlyRole(DEFAULT_ADMIN_ROLE) onlyListed(_token) {
+        listedTokens[_token].isListed = false;
+
+        emit TokenUnlisted(_token, msg.sender);
     }
 
     /// @notice Creates a buy order for a listed token
