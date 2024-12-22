@@ -105,8 +105,9 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
     /// Token address being traded
     /// True if this is a buy order
     /// Price per token in USDT
-    /// Amount of tokens in the order
     /// Amount of tokens filled
+    /// USDT amount exchanged in the trade
+    /// USDT fee charged for the trade
     /// Block timestamp when fill occurred
     event OrderFilled(
         uint256 indexed orderId,
