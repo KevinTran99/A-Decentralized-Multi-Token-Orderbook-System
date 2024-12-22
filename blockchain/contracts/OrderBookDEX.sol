@@ -115,8 +115,9 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
         address token,
         bool isBuyOrder,
         uint256 price,
-        uint256 amount,
         uint256 filled,
+        uint256 usdtAmount,
+        uint256 feeAmount,
         uint256 timestamp
     );
 
@@ -323,7 +324,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             USDT.transfer(order.maker, orderCost);
             IERC20(order.token).transfer(msg.sender, amountWanted);
 
-            emit OrderFilled(order.orderId, order.maker, msg.sender, order.token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
+            emit OrderFilled(order.orderId, order.maker, msg.sender, order.token, order.isBuyOrder, order.price, amountWanted, orderCost, fee, block.timestamp);
 
             if (order.filled == order.amount) {
                 _removeOrder(_orderIds[i], orderInfo.token, orderInfo.index);
@@ -382,7 +383,7 @@ contract OrderBookDEX is ReentrancyGuard, AccessControl {
             IERC20(_token).transfer(order.maker, amountWanted);
             USDT.transfer(msg.sender, orderCost - fee);
 
-            emit OrderFilled(order.orderId, order.maker, msg.sender, _token, order.isBuyOrder, order.price, order.amount, amountWanted, block.timestamp);
+            emit OrderFilled(order.orderId, order.maker, msg.sender, _token, order.isBuyOrder, order.price, amountWanted, orderCost, fee, block.timestamp);
 
             if (order.filled == order.amount) {
                 _removeOrder(order.orderId, _token, orderInfo.index);
