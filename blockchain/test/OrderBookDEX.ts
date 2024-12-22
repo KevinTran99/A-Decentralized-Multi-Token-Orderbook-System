@@ -358,14 +358,15 @@ describe('OrderBookDEX', function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
       const amount = hre.ethers.parseUnits('1', 18);
-      const totalCost = price;
+      const orderCost = price;
+      const fee = 0n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
       await ETH.connect(user1).approve(await orderBookDEX.getAddress(), amount);
       await orderBookDEX.connect(user1).createSellOrder(await ETH.getAddress(), price, amount);
-      await USDT.connect(user2).approve(await orderBookDEX.getAddress(), totalCost);
+      await USDT.connect(user2).approve(await orderBookDEX.getAddress(), orderCost);
 
-      await expect(orderBookDEX.connect(user2).marketBuy([1], [amount], totalCost))
+      await expect(orderBookDEX.connect(user2).marketBuy([1], [amount], orderCost))
         .to.emit(orderBookDEX, 'OrderFilled')
         .withArgs(
           1,
@@ -375,7 +376,8 @@ describe('OrderBookDEX', function () {
           false,
           price,
           amount,
-          amount,
+          orderCost,
+          fee,
           (await time.latest()) + 1
         );
 
@@ -556,10 +558,11 @@ describe('OrderBookDEX', function () {
       const { orderBookDEX, ETH, USDT, user1, user2 } = await deployOrderBookDEXFixture();
       const price = hre.ethers.parseUnits('4000', 6);
       const amount = hre.ethers.parseUnits('1', 18);
-      const totalCost = price;
+      const orderCost = price;
+      const fee = 0n;
 
       await orderBookDEX.listToken(await ETH.getAddress());
-      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), totalCost);
+      await USDT.connect(user1).approve(await orderBookDEX.getAddress(), orderCost);
       await orderBookDEX.connect(user1).createBuyOrder(await ETH.getAddress(), price, amount);
       await ETH.connect(user2).approve(await orderBookDEX.getAddress(), amount);
 
@@ -573,11 +576,12 @@ describe('OrderBookDEX', function () {
           true,
           price,
           amount,
-          amount,
+          orderCost,
+          fee,
           (await time.latest()) + 1
         );
 
-      expect(await USDT.balanceOf(user2.address)).to.equal(hre.ethers.parseUnits('10000', 6) + totalCost);
+      expect(await USDT.balanceOf(user2.address)).to.equal(hre.ethers.parseUnits('10000', 6) + orderCost);
     });
 
     it('Should handle partial fills correctly', async function () {
