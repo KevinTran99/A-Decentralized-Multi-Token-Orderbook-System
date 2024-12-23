@@ -25,6 +25,44 @@ class Orderbook {
     });
   }
 
+  removeOrder(order) {
+    const orders = this.ordersByToken.get(order.token);
+    if (!orders) return;
+
+    const ordersList = order.isBuyOrder ? orders.bids : orders.asks;
+    const index = ordersList.findIndex(o => o.orderId === order.orderId);
+
+    if (index !== -1) {
+      ordersList.splice(index, 1);
+      this.orderMap.delete(order.orderId);
+    }
+  }
+
+  handleOrderCreated(createdOrder) {
+    console.log('Order created:', createdOrder);
+    this.addOrder(createdOrder);
+  }
+
+  handleOrderFilled(filledOrder) {
+    console.log('Order filled:', filledOrder);
+    const order = this.orderMap.get(filledOrder.orderId);
+    if (!order) return;
+
+    order.filled = (BigInt(order.filled) + BigInt(filledOrder.filled)).toString();
+
+    if (BigInt(order.filled) === BigInt(order.amount)) {
+      this.removeOrder(order);
+    }
+  }
+
+  handleOrderCancelled(cancelledOrder) {
+    console.log('Order cancelled:', cancelledOrder);
+    const order = this.orderMap.get(cancelledOrder.orderId);
+    if (!order) return;
+
+    this.removeOrder(order);
+  }
+
   getOrderBook(token) {
     const orders = this.ordersByToken.get(token);
     if (!orders) return { bids: [], asks: [] };

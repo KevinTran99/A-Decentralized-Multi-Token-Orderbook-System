@@ -17,6 +17,48 @@ class BlockchainService {
     });
   }
 
+  listenToEvents({ onOrderCreated, onOrderFilled, onOrderCancelled }) {
+    this.contract.on('OrderCreated', (orderId, maker, token, isBuyOrder, price, amount, timestamp) => {
+      onOrderCreated({
+        orderId: orderId.toString(),
+        maker,
+        token,
+        isBuyOrder,
+        price: price.toString(),
+        amount: amount.toString(),
+        filled: '0',
+        timestamp: timestamp.toString(),
+      });
+    });
+
+    this.contract.on(
+      'OrderFilled',
+      (orderId, maker, taker, token, isBuyOrder, price, filled, usdtAmount, feeAmount, timestamp) => {
+        onOrderFilled({
+          orderId: orderId.toString(),
+          maker,
+          taker,
+          token,
+          isBuyOrder,
+          price: price.toString(),
+          filled: filled.toString(),
+          usdtAmount: usdtAmount.toString(),
+          feeAmount: feeAmount.toString(),
+          timestamp: timestamp.toString(),
+        });
+      }
+    );
+
+    this.contract.on('OrderCancelled', (orderId, maker, token, timestamp) => {
+      onOrderCancelled({
+        orderId: orderId.toString(),
+        maker,
+        token,
+        timestamp: timestamp.toString(),
+      });
+    });
+  }
+
   async getActiveOrders(token) {
     const orders = await this.contract.getActiveOrders(token);
     return orders.map(order => ({

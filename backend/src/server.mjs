@@ -22,6 +22,12 @@ async function initialize() {
       const activeOrders = await blockchainService.getActiveOrders(token.address);
       orderbook.processOrders(activeOrders);
     }
+
+    blockchainService.listenToEvents({
+      onOrderCreated: createdOrder => orderbook.handleOrderCreated(createdOrder),
+      onOrderFilled: filledOrder => orderbook.handleOrderFilled(filledOrder),
+      onOrderCancelled: cancelledOrder => orderbook.handleOrderCancelled(cancelledOrder),
+    });
   } catch (error) {
     console.error('Initialization error:', error);
   }
