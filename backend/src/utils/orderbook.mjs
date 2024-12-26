@@ -1,3 +1,6 @@
+import { SUPPORTED_TOKENS } from '../config/tokens.mjs';
+import { config } from '../config/config.mjs';
+
 class Orderbook {
   constructor() {
     this.ordersByToken = new Map();
@@ -66,6 +69,45 @@ class Orderbook {
     if (!order) return;
 
     this.removeOrder(order);
+  }
+
+  findMarketBuyMatches(token, amount, maxPrice) {
+    const orders = this.ordersByToken.get(token);
+    if (!orders?.asks?.length) return null;
+
+    const tokenConfig = SUPPORTED_TOKENS.find(t => t.address === token);
+    if (!tokenConfig) return null;
+
+    let remainingAmount = BigInt(amount);
+    const matches = { orderIds: [], amounts: [], totalUsdt: 0n };
+
+    for (const order of orders.asks) {
+      if (remainingAmount <= 0n) break;
+      if (BigInt(order.price) > BigInt(maxPrice)) break;
+
+      const availableAmount = BigInt(order.amount) - BigInt(order.filled);
+      if (availableAmount <= 0n) continue;
+
+      const fillAmount = remainingAmount > availableAmount ? availableAmount : remainingAmount;
+
+      const orderCost = (fillAmount * BigInt(order.price)) / BigInt(10 ** tokenConfig.decimals);
+
+      matches.orderIds.push(order.orderId);
+      matches.amounts.push(fillAmount.toString());
+      matches.totalUsdt += orderCost;
+      remainingAmount -= fillAmount;
+    }
+
+    if (matches.orderIds.length === 0) return null;
+
+    const fee = (matches.totalUsdt * BigInt(config.FEE_PERCENT)) / 10000n;
+    matches.totalUsdt += fee;
+
+    return {
+      orderIds: matches.orderIds,
+      amounts: matches.amounts,
+      totalUsdt: matches.totalUsdt.toString(),
+    };
   }
 
   getOrderBook(token) {
