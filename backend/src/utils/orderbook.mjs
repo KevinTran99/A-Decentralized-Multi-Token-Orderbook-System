@@ -110,6 +110,41 @@ class Orderbook {
     };
   }
 
+  findMarketSellMatches(token, amount, minPrice) {
+    const orders = this.ordersByToken.get(token);
+    if (!orders?.bids?.length) return null;
+
+    const tokenConfig = SUPPORTED_TOKENS.find(t => t.address === token);
+    if (!tokenConfig) return null;
+
+    let remainingAmount = BigInt(amount);
+    const matches = { orderIds: [], amounts: [], totalTokens: 0n };
+
+    for (const order of orders.bids) {
+      if (remainingAmount <= 0n) break;
+      if (BigInt(order.price) < BigInt(minPrice)) break;
+
+      const availableAmount = BigInt(order.amount) - BigInt(order.filled);
+      if (availableAmount <= 0n) continue;
+
+      const fillAmount = remainingAmount > availableAmount ? availableAmount : remainingAmount;
+
+      matches.orderIds.push(order.orderId);
+      matches.amounts.push(fillAmount.toString());
+      matches.totalTokens += fillAmount;
+      remainingAmount -= fillAmount;
+    }
+
+    if (matches.orderIds.length === 0) return null;
+
+    return {
+      orderIds: matches.orderIds,
+      amounts: matches.amounts,
+      token: token,
+      totalTokens: matches.totalTokens.toString(),
+    };
+  }
+
   getOrderBook(token) {
     const orders = this.ordersByToken.get(token);
     if (!orders) return { bids: [], asks: [] };
