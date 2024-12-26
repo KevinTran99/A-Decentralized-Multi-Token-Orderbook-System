@@ -21,7 +21,12 @@ class Orderbook {
 
     orderList.sort((a, b) => {
       const priceDiff = BigInt(b.price) - BigInt(a.price);
-      return order.isBuyOrder ? Number(priceDiff) : -Number(priceDiff);
+
+      if (priceDiff !== 0n) {
+        return order.isBuyOrder ? Number(priceDiff) : -Number(priceDiff);
+      }
+
+      return Number(BigInt(a.timestamp) - BigInt(b.timestamp));
     });
   }
 
