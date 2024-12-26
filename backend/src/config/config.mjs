@@ -10,4 +10,5 @@ export const config = {
   CONTRACTS: {
     ORDERBOOKDEX: process.env.ORDERBOOKDEX_ADDRESS || '',
   },
+  FEE_PERCENT: 100,
 };
