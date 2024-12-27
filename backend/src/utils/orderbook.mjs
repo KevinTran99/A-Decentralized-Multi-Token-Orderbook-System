@@ -5,6 +5,7 @@ class Orderbook {
   constructor() {
     this.ordersByToken = new Map();
     this.orderMap = new Map();
+    this.reservations = new Map();
   }
 
   processOrders(activeOrders) {
@@ -143,6 +144,48 @@ class Orderbook {
       token: token,
       totalTokens: matches.totalTokens.toString(),
     };
+  }
+
+  createReservation(matches) {
+    const expiresAt = Date.now() + 30000;
+
+    matches.orderIds.forEach((orderId, index) => {
+      const reservedAmount = BigInt(matches.amounts[index]);
+      const reservation = this.reservations.get(orderId) || { totalReserved: 0n, reservations: [] };
+
+      reservation.totalReserved += reservedAmount;
+      reservation.reservations.push({ amount: reservedAmount.toString(), expiresAt });
+
+      this.reservations.set(orderId, reservation);
+    });
+
+    return { expiresAt, matches };
+  }
+
+  cleanExpiredReservations() {
+    const now = Date.now();
+    const updates = new Set();
+
+    for (const [orderId, reservation] of this.reservations.entries()) {
+      reservation.reservations = reservation.reservations.filter(res => {
+        if (now <= res.expiresAt) return true;
+
+        reservation.totalReserved -= BigInt(res.amount);
+
+        const order = this.orderMap.get(orderId);
+        if (order) {
+          updates.add(order.token);
+        }
+
+        return false;
+      });
+
+      if (reservation.reservations.length === 0) {
+        this.reservations.delete(orderId);
+      }
+    }
+
+    return Array.from(updates);
   }
 
   getOrderBook(token) {
