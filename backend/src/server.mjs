@@ -34,7 +34,7 @@ wss.on('connection', ws => {
       ws.send(
         JSON.stringify({
           type: 'ORDERBOOK_UPDATE',
-          token,
+          token: token,
           data: orderBookData,
         })
       );
@@ -86,6 +86,19 @@ async function initialize() {
         });
       },
     });
+
+    setInterval(() => {
+      const updatedTokens = orderbook.cleanExpiredReservations();
+
+      updatedTokens.forEach(token => {
+        const updatedOrderBook = orderbook.getOrderBook(token);
+        app.locals.broadcast({
+          type: 'ORDERBOOK_UPDATE',
+          token: token,
+          data: updatedOrderBook,
+        });
+      });
+    }, 1000);
   } catch (error) {
     console.error('Initialization error:', error);
   }
