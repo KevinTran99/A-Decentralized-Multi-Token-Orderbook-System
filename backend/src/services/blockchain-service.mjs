@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { config } from '../config/config.mjs';
-import contractAbi from '../orderbook-dex-abi.json' assert { type: 'json' };
+import contractAbi from '../orderbook-dex-abi.json' with { type: 'json' };
 
 class BlockchainService {
   constructor() {
