@@ -59,13 +59,20 @@ class Orderbook {
 
     order.filled = (BigInt(order.filled) + BigInt(filledOrder.filled)).toString();
 
+    const reservation = this.reservations.get(filledOrder.orderId);
+    if (reservation) {
+      reservation.totalReserved -= BigInt(filledOrder.filled);
+    }
+
     if (BigInt(order.filled) === BigInt(order.amount)) {
+      this.reservations.delete(filledOrder.orderId);
       this.removeOrder(order);
     }
   }
 
   handleOrderCancelled(cancelledOrder) {
     console.log('Order cancelled:', cancelledOrder);
+    this.reservations.delete(cancelledOrder.orderId);
     const order = this.orderMap.get(cancelledOrder.orderId);
     if (!order) return;
 
@@ -86,7 +93,8 @@ class Orderbook {
       if (remainingAmount <= 0n) break;
       if (BigInt(order.price) > BigInt(maxPrice)) break;
 
-      const availableAmount = BigInt(order.amount) - BigInt(order.filled);
+      const reservation = this.reservations.get(order.orderId) || { totalReserved: 0n };
+      const availableAmount = BigInt(order.amount) - BigInt(order.filled) - reservation.totalReserved;
       if (availableAmount <= 0n) continue;
 
       const fillAmount = remainingAmount > availableAmount ? availableAmount : remainingAmount;
@@ -125,7 +133,8 @@ class Orderbook {
       if (remainingAmount <= 0n) break;
       if (BigInt(order.price) < BigInt(minPrice)) break;
 
-      const availableAmount = BigInt(order.amount) - BigInt(order.filled);
+      const reservation = this.reservations.get(order.orderId) || { totalReserved: 0n };
+      const availableAmount = BigInt(order.amount) - BigInt(order.filled) - reservation.totalReserved;
       if (availableAmount <= 0n) continue;
 
       const fillAmount = remainingAmount > availableAmount ? availableAmount : remainingAmount;
@@ -196,7 +205,8 @@ class Orderbook {
       const priceMap = new Map();
 
       orderList.forEach(order => {
-        const available = BigInt(order.amount) - BigInt(order.filled);
+        const reservation = this.reservations.get(order.orderId) || { totalReserved: 0n };
+        const available = BigInt(order.amount) - BigInt(order.filled) - reservation.totalReserved;
         if (available > 0n) {
           priceMap.set(order.price, (priceMap.get(order.price) || 0n) + available);
         }
